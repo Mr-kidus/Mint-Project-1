@@ -2,6 +2,7 @@ import Performance from '../models/performanceModel.js';
 import Plan from '../models/planModels.js';
 import KPI from '../models/kpiModel2.js';
 import mongoose from 'mongoose';
+
 // Create or update performance entry
 export const createOrUpdatePerformance = async (req, res) => {
   console.log("Request body received:", req.body);
@@ -23,20 +24,28 @@ export const createOrUpdatePerformance = async (req, res) => {
       return res.status(400).json({ message: "Missing required fields." });
     }
 
+    // Find KPI by name
     const kpi = await KPI.findOne({ kpi_name });
     if (!kpi) return res.status(404).json({ message: "KPI not found." });
 
-    const plan = await Plan.findOne({
+    // Find the corresponding Plan to get planId
+    const planFilter = {
       kpiId: kpi._id,
       year,
       role,
       sectorId,
       userId,
-      ...(subsectorId && { subsectorId }),
-    });
+    };
+    if (subsectorId) planFilter.subsectorId = subsectorId;
+
+    const plan = await Plan.findOne(planFilter);
+    if (!plan) {
+      return res.status(404).json({ message: "Plan not found for given criteria." });
+    }
 
     const target = quarter && plan ? plan[quarter.toLowerCase()] || 0 : plan?.target || 0;
 
+    // Prepare filter for existing Performance record
     const perfFilter = {
       userId,
       kpiId: kpi._id,
@@ -46,6 +55,8 @@ export const createOrUpdatePerformance = async (req, res) => {
     };
 
     let existingPerformance = await Performance.findOne(perfFilter);
+
+    // Build update object with planId included
     const update = {
       userId,
       role,
@@ -56,13 +67,14 @@ export const createOrUpdatePerformance = async (req, res) => {
       sectorId,
       subsectorId,
       deskId,
+      planId: plan._id,        // <-- Add planId here
     };
 
     if (quarter) {
       const q = quarter.toLowerCase();
       const perfField = `${q}Performance`;
 
-      // Get existing performance data if present
+      // Get existing quarter performance values for validation
       const q1 = existingPerformance?.q1Performance?.value || 0;
       const q2 = existingPerformance?.q2Performance?.value || 0;
       const q3 = existingPerformance?.q3Performance?.value || 0;
@@ -74,13 +86,13 @@ export const createOrUpdatePerformance = async (req, res) => {
       if (q === 'q4' && performanceMeasure < q3)
         return res.status(400).json({ message: "Q4 performance must be ≥ Q3." });
 
-      // Set quarter-specific performance
+      // Set quarter-specific performance and description
       update[perfField] = {
         value: performanceMeasure,
         description: description || '',
       };
 
-      // Recalculate yearly performance
+      // Recalculate yearly performance based on latest quarter performance
       const quarterFields = ['q4Performance', 'q3Performance', 'q2Performance', 'q1Performance'];
       let latest = 0;
 
@@ -92,7 +104,7 @@ export const createOrUpdatePerformance = async (req, res) => {
         }
       }
 
-      // Compare with last year
+      // Check current year's performance is not less than last year's
       const lastYearPerf = await Performance.findOne({
         userId,
         kpiId: kpi._id,
@@ -145,6 +157,7 @@ export const createOrUpdatePerformance = async (req, res) => {
 };
 
 
+
 // Get all performance entries with optional filters
 export const getPerformances = async (req, res) => {
   try {
@@ -195,7 +208,7 @@ export const getPerformanceAndTarget = async (req, res) => {
       return res.status(404).json({ message: "KPI not found." });
     }
 
-    // Find Plan for target
+    // Get plan target
     const planFilter = {
       kpiId: kpi._id,
       year,
@@ -207,7 +220,6 @@ export const getPerformanceAndTarget = async (req, res) => {
 
     const plan = await Plan.findOne(planFilter);
 
-    // Extract target for the quarter (e.g., q1, q2, q3, q4) or yearly target if quarter missing
     let target = 0;
     if (plan) {
       if (quarter) {
@@ -217,28 +229,42 @@ export const getPerformanceAndTarget = async (req, res) => {
       }
     }
 
-    // Find existing performance record
+    // Fetch performance record
     const perfFilter = {
       userId,
       kpiId: kpi._id,
       year,
+      sectorId,
     };
-    if (quarter) perfFilter.quarter = quarter;
-    if (sectorId) perfFilter.sectorId = sectorId;
     if (subsectorId) perfFilter.subsectorId = subsectorId;
 
     const performance = await Performance.findOne(perfFilter);
 
+    let performanceMeasure = "";
+    let description = "";
+
+    if (performance) {
+      if (quarter) {
+        const field = performance[`${quarter.toLowerCase()}Performance`];
+        performanceMeasure = field?.value ?? "";
+        description = field?.description ?? "";
+      } else {
+        performanceMeasure = performance.performanceYear ?? "";
+        description = performance.performanceDescription ?? "";
+      }
+    }
+
     return res.status(200).json({
       target,
-      performanceMeasure: performance?.performanceMeasure || "",
-      description: performance?.description || "",
+      performanceMeasure,
+      description,
     });
   } catch (error) {
     console.error("getPerformanceAndTarget error:", error);
     return res.status(500).json({ message: "Server error." });
   }
 };
+
 
 // You can keep other methods like getPerformanceById, updatePerformance, deletePerformance here as needed.
 

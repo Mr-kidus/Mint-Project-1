@@ -154,11 +154,6 @@ function PerformanceModal({ modalInfo, closeModal, handleFormSubmit }) {
       return;
     }
 
-    if (target !== "" && !isNaN(parseFloat(target)) && perfValue > parseFloat(target)) {
-      setError("Performance measure cannot exceed the target.");
-      return;
-    }
-
     const data = {
       ...modalInfo,
       year,
